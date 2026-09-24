@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.raycast/
+*.log
+.DS_Store
+*.tsbuildinfo
+raycast-env.d.ts
+
+# local print captures and preview renders
+.captures/
+.previews/

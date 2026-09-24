@@ -1,0 +1,387 @@
+{
+  "$schema": "https://www.raycast.com/schemas/extension.json",
+  "name": "thermal-print",
+  "title": "Thermal Print",
+  "description": "Build to-do lists from the search bar, with due dates in plain English, and print them on a thermal receipt printer.",
+  "icon": "icon.png",
+  "author": "yz3440",
+  "categories": [
+    "Productivity"
+  ],
+  "license": "MIT",
+  "platforms": [
+    "macOS"
+  ],
+  "commands": [
+    {
+      "name": "todo-list",
+      "title": "To-Do List",
+      "subtitle": "Thermal Print",
+      "description": "Type tasks with dates like “call dentist tomorrow 3pm”, then print the whole list as one receipt.",
+      "mode": "view",
+      "keywords": [
+        "tasks",
+        "todo",
+        "due",
+        "print",
+        "list"
+      ]
+    },
+    {
+      "name": "add-todo",
+      "title": "Add To-Do",
+      "subtitle": "Thermal Print",
+      "description": "Add a task to your to-do list without opening it. Dates like “friday 3pm” are understood; start or end with @list for another list.",
+      "mode": "no-view",
+      "arguments": [
+        {
+          "name": "text",
+          "placeholder": "Task, e.g. call dentist tomorrow 3pm",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "print-todos",
+      "title": "Print To-Do List",
+      "subtitle": "Thermal Print",
+      "description": "Print your to-do list, grouped by day, as one receipt.",
+      "mode": "no-view",
+      "arguments": [
+        {
+          "name": "list",
+          "placeholder": "List (optional)",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "compose-receipt",
+      "title": "Compose Receipt",
+      "subtitle": "Thermal Print",
+      "description": "Write a memo or checklist, preview it, then print it.",
+      "mode": "view",
+      "keywords": [
+        "write",
+        "memo",
+        "checklist",
+        "note"
+      ]
+    },
+    {
+      "name": "print-image",
+      "title": "Print Image",
+      "subtitle": "Thermal Print",
+      "description": "Print photos, screenshots or any image file, dithered for thermal paper.",
+      "mode": "view",
+      "keywords": [
+        "photo",
+        "picture",
+        "screenshot",
+        "png",
+        "jpeg",
+        "heic"
+      ]
+    },
+    {
+      "name": "print-selection",
+      "title": "Print Selection or Clipboard",
+      "subtitle": "Thermal Print",
+      "description": "Print the selected text or images, or what's on the clipboard. Works with Raycast Notes, Finder and screenshots.",
+      "mode": "no-view",
+      "keywords": [
+        "notes",
+        "clipboard",
+        "selected",
+        "finder",
+        "screenshot"
+      ]
+    },
+    {
+      "name": "receipt-library",
+      "title": "Receipt Library",
+      "subtitle": "Thermal Print",
+      "description": "Your lists, drafts, pending jobs and print history.",
+      "mode": "view",
+      "keywords": [
+        "lists",
+        "drafts",
+        "history",
+        "pending"
+      ]
+    },
+    {
+      "name": "printer-status",
+      "title": "Printer Status",
+      "subtitle": "Thermal Print",
+      "description": "Check the printer's connection, paper and cover, and print a test page.",
+      "mode": "view",
+      "keywords": [
+        "test",
+        "paper",
+        "diagnostics"
+      ]
+    }
+  ],
+  "preferences": [
+    {
+      "name": "printerAddress",
+      "title": "Printer Address",
+      "description": "IP address or hostname of the printer, optionally followed by :port (default 9100).",
+      "type": "textfield",
+      "required": true,
+      "placeholder": "192.168.1.3"
+    },
+    {
+      "name": "printerModel",
+      "title": "Printer Model",
+      "description": "Auto-detect asks Epson printers for their model name. Pick a preset if detection fails or you use another brand.",
+      "type": "dropdown",
+      "required": false,
+      "default": "auto",
+      "data": [
+        {
+          "title": "Auto-detect",
+          "value": "auto"
+        },
+        {
+          "title": "Bixolon SRP-350",
+          "value": "bixolon-srp350"
+        },
+        {
+          "title": "Bixolon SRP-350III",
+          "value": "bixolon-srp350iii"
+        },
+        {
+          "title": "Citizen CT-S310II",
+          "value": "citizen-ct-s310ii"
+        },
+        {
+          "title": "Epson TM-m30II",
+          "value": "epson-tm-m30ii"
+        },
+        {
+          "title": "Epson TM-m30III",
+          "value": "epson-tm-m30iii"
+        },
+        {
+          "title": "Epson TM-P20II",
+          "value": "epson-tm-p20ii"
+        },
+        {
+          "title": "Epson TM-T20II",
+          "value": "epson-tm-t20ii"
+        },
+        {
+          "title": "Epson TM-T20III",
+          "value": "epson-tm-t20iii"
+        },
+        {
+          "title": "Epson TM-T20IV",
+          "value": "epson-tm-t20iv"
+        },
+        {
+          "title": "Epson TM-T70",
+          "value": "epson-tm-t70"
+        },
+        {
+          "title": "Epson TM-T70II",
+          "value": "epson-tm-t70ii"
+        },
+        {
+          "title": "Epson TM-T88II",
+          "value": "epson-tm-t88ii"
+        },
+        {
+          "title": "Epson TM-T88III",
+          "value": "epson-tm-t88iii"
+        },
+        {
+          "title": "Epson TM-T88IV",
+          "value": "epson-tm-t88iv"
+        },
+        {
+          "title": "Epson TM-T88V",
+          "value": "epson-tm-t88v"
+        },
+        {
+          "title": "Epson TM-T88VI",
+          "value": "epson-tm-t88vi"
+        },
+        {
+          "title": "Epson TM-T88VII",
+          "value": "epson-tm-t88vii"
+        },
+        {
+          "title": "Fujitsu FP-1000",
+          "value": "fujitsu-fp1000"
+        },
+        {
+          "title": "HP A779",
+          "value": "hp-a779"
+        },
+        {
+          "title": "Metapace T-1",
+          "value": "metapace-t1"
+        },
+        {
+          "title": "MPT-II",
+          "value": "mpt-ii"
+        },
+        {
+          "title": "POS-5890 (generic 58 mm)",
+          "value": "pos-5890"
+        },
+        {
+          "title": "POS-8360 (generic 80 mm)",
+          "value": "pos-8360"
+        },
+        {
+          "title": "Star mC-Print2",
+          "value": "star-mc-print2"
+        },
+        {
+          "title": "Star mPOP",
+          "value": "star-mpop"
+        },
+        {
+          "title": "Star SM-L200",
+          "value": "star-sm-l200"
+        },
+        {
+          "title": "Star TSP100III",
+          "value": "star-tsp100iii"
+        },
+        {
+          "title": "Star TSP100IV",
+          "value": "star-tsp100iv"
+        },
+        {
+          "title": "Star TSP650",
+          "value": "star-tsp650"
+        },
+        {
+          "title": "Star TSP650II",
+          "value": "star-tsp650ii"
+        },
+        {
+          "title": "SUNMI P2SE",
+          "value": "sunmi-p2se"
+        },
+        {
+          "title": "SUNMI P3H",
+          "value": "sunmi-p3h"
+        },
+        {
+          "title": "SUNMI P3KH",
+          "value": "sunmi-p3kh"
+        },
+        {
+          "title": "SUNMI P3 MIX",
+          "value": "sunmi-p3mix"
+        },
+        {
+          "title": "SUNMI Generic",
+          "value": "sunmi"
+        },
+        {
+          "title": "Xprinter XP-N160II",
+          "value": "xprinter-xp-n160ii"
+        },
+        {
+          "title": "Xprinter XP-T80Q",
+          "value": "xprinter-xp-t80q"
+        },
+        {
+          "title": "Youku 58T",
+          "value": "youku-58t"
+        }
+      ]
+    },
+    {
+      "name": "cutMode",
+      "title": "Cut",
+      "description": "Partial cuts keep tickets hanging in a chain; full cuts drop each one.",
+      "type": "dropdown",
+      "required": false,
+      "default": "partial",
+      "data": [
+        {
+          "title": "Partial",
+          "value": "partial"
+        },
+        {
+          "title": "Full",
+          "value": "full"
+        },
+        {
+          "title": "None (tear by hand)",
+          "value": "none"
+        }
+      ]
+    },
+    {
+      "name": "dateOrder",
+      "title": "Numeric Dates",
+      "description": "How to read dates written as numbers, like 10/9.",
+      "type": "dropdown",
+      "required": false,
+      "default": "month-first",
+      "data": [
+        {
+          "title": "Month/Day (9/30)",
+          "value": "month-first"
+        },
+        {
+          "title": "Day/Month (30/9)",
+          "value": "day-first"
+        }
+      ]
+    },
+    {
+      "name": "label",
+      "title": "Label",
+      "description": "Optional name printed at the top of lists and memos.",
+      "type": "textfield",
+      "required": false,
+      "placeholder": "MY DESK"
+    }
+  ],
+  "dependencies": {
+    "@point-of-sale/codepage-encoder": "^3.0.2",
+    "@point-of-sale/receipt-printer-encoder": "^4.0.1",
+    "@point-of-sale/receipt-printer-renderer": "^1.1.0",
+    "@raycast/api": "^2.4.1",
+    "@raycast/utils": "^2.3.1",
+    "chrono-node": "^2.10.1",
+    "pngjs": "^7.0.0"
+  },
+  "devDependencies": {
+    "@raycast/eslint-config": "^1.0.11",
+    "@types/node": "22.19.17",
+    "@types/pngjs": "^6.0.5",
+    "@types/react": "19.0.10",
+    "eslint": "^8.57.0",
+    "prettier": "^3.3.3",
+    "tsx": "^4.20.0",
+    "typescript": "^5.5.3"
+  },
+  "scripts": {
+    "build": "ray build -e dist",
+    "dev": "ray develop",
+    "fix-lint": "ray lint --fix",
+    "lint": "ray lint",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/unit/*.test.ts",
+    "check": "npm run typecheck && npm run lint && npm run build && npm test",
+    "render": "tsx scripts/render.ts",
+    "fake-printer": "tsx tests/harness/fake-printer.ts",
+    "gen-models": "tsx scripts/gen-models.ts",
+    "publish": "npx @raycast/api@latest publish",
+    "print-sample": "tsx scripts/print-sample.ts",
+    "counters": "tsx scripts/counters.ts",
+    "print-image": "tsx scripts/print-image.ts"
+  }
+}

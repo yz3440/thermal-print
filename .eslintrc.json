@@ -1,0 +1,22 @@
+{
+  "root": true,
+  "extends": "@raycast/eslint-config",
+  "overrides": [
+    {
+      "files": ["src/core/**/*.ts"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["@raycast/*", "react", "react/*"],
+                "message": "src/core must stay pure so it can be tested in plain Node. Put Raycast code in src/ui."
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
