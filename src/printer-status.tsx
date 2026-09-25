@@ -12,45 +12,13 @@ import {
 import { usePromise } from "@raycast/utils";
 import { blockingReason, type PrinterStatus } from "./core/escpos";
 import { encodeFeedAndCut } from "./core/layout";
-import { FALLBACK_MODEL, isModelId, modelFromIdentity, specFor, type ModelId } from "./core/models";
-import { formatEndpoint, parseAddress, PrinterError, probe, sendJob, serialize, type Probe } from "./core/transport";
+import { specFor } from "./core/models";
+import { parseAddress, PrinterError, sendJob, serialize } from "./core/transport";
 import { printingToast, showPrintResult } from "./ui/feedback";
 import { print } from "./ui/printing";
 import { printerSettings } from "./ui/settings";
-import { ready, store } from "./ui/storage";
-
-interface Check {
-  address: string;
-  probe: Probe;
-  model: ModelId;
-  /** How the model was chosen. */
-  modelSource: string;
-}
-
-async function checkPrinter(address: string, setting: string): Promise<Check> {
-  await ready();
-  const endpoint = parseAddress(address);
-  const key = formatEndpoint(endpoint);
-  const result = await serialize(() => probe(endpoint));
-  let model: ModelId;
-  let modelSource: string;
-  if (isModelId(setting)) {
-    model = setting;
-    modelSource = "Set in preferences";
-  } else {
-    const detected = modelFromIdentity(result.identity?.maker, result.identity?.model);
-    const identity = [result.identity?.maker, result.identity?.model].filter(Boolean).join(" ") || undefined;
-    if (result.identity) {
-      await store.setPrinterCache(key, { model: detected ?? FALLBACK_MODEL, detected: !!detected, identity });
-    }
-    const cached = await store.printerCache(key);
-    model = detected ?? (cached && isModelId(cached.model) ? cached.model : FALLBACK_MODEL);
-    modelSource = detected
-      ? "Detected"
-      : `Not detected${identity ? ` (says “${identity}”)` : ""}, using the 80 mm default`;
-  }
-  return { address: key, probe: result, model, modelSource };
-}
+import { checkPrinter, type Check } from "./ui/status";
+import { store } from "./ui/storage";
 
 function statusLine(status: PrinterStatus | undefined): { text: string; color: Color } {
   if (!status) return { text: "Connected (the printer doesn't report its status)", color: Color.Blue };
@@ -68,19 +36,18 @@ function testPage(check: Check) {
     body: [
       `This printer: ${specFor(check.model).name} at ${check.address}.`,
       "",
-      "## To-do lists",
-      "- **To-Do List**: type a task with a date, press Enter, repeat. Cmd+Enter prints the whole list.",
-      "- **Add To-Do**: add a task from anywhere, e.g. call dentist tomorrow 3pm.",
-      "- **Print To-Do List**: print the list with a hotkey.",
-      "- Start or end a task with @name to put it on another list: oat milk @groceries",
-      "",
-      "## Dates it understands",
-      "today, tonight, tomorrow 3pm, friday, next monday at 9, sep 30, in 2 weeks, 14:30",
-      "",
-      "## Also",
+      "## Commands",
       "- **Compose Receipt**: notes and lists with a preview.",
-      "- **Print Selection or Clipboard**: in Raycast Notes, select all, then run it with a hotkey.",
-      "- **Receipt Library**: lists, drafts, pending jobs and history.",
+      "- **Print Selection or Clipboard**: select text or images anywhere, then run it with a hotkey.",
+      "- **Print Image**: photos and screenshots, dithered for thermal paper.",
+      "- **Receipt Library**: drafts, pending jobs and history.",
+      "",
+      "## Lists with dates",
+      "- [ ] call dentist tomorrow 3pm",
+      "- [ ] pay rent sep 30",
+      "",
+      "## Raycast AI",
+      "Ask it to print today's tasks, a note, or what's on the clipboard.",
       "",
       "**bold**, __underline__, ==highlight==",
     ].join("\n"),
@@ -133,6 +100,9 @@ export default function PrinterStatusCommand() {
       ? [
           `# ${spec.name}`,
           `**${line.text}** at \`${data.address}\`, answered in ${data.probe.connectMs} ms.`,
+          data.detected
+            ? ""
+            : "The printer didn't say what model it is, so receipts use the 80 mm default layout. If your paper is 58 mm wide or lines wrap oddly, pick your printer under **Printer Model** in the preferences.",
           status?.paperNearEnd
             ? "The paper-low sensor says the roll is nearly empty. Many printers always say this, so it never stops a print."
             : "",

@@ -5,7 +5,7 @@
  */
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { access, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -83,6 +83,8 @@ export async function loadImage(src: string): Promise<RasterImage> {
 }
 
 // Writes the clipboard's image data (PNG, or TIFF as screenshots and most apps put it) to argv[0].
+// Raycast's Clipboard.read() only returns a path for a copied file, not for pixels on the clipboard,
+// so a screenshot has to be fetched from the pasteboard by hand.
 const SAVE_CLIPBOARD_IMAGE = `
 ObjC.import("AppKit");
 function run(argv) {
@@ -116,4 +118,24 @@ export async function saveClipboardImage(directory: string): Promise<string | un
     await rename(saved, file);
   }
   return file;
+}
+
+/** Deletes the files in `directory` that aren't in `keep` and are older than `olderThanMs`. */
+export async function pruneDirectory(directory: string, keep: Set<string>, olderThanMs: number): Promise<void> {
+  let names: string[];
+  try {
+    names = await readdir(directory);
+  } catch {
+    return;
+  }
+  const cutoff = Date.now() - olderThanMs;
+  for (const name of names) {
+    const file = path.join(directory, name);
+    if (keep.has(file)) continue;
+    try {
+      if ((await stat(file)).mtimeMs < cutoff) await rm(file, { force: true });
+    } catch {
+      // Gone already, or not ours to delete.
+    }
+  }
 }

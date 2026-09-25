@@ -1,7 +1,7 @@
 /**
- * What the extension remembers: to-do lists, drafts, print history, pending jobs and detected
- * printer models. Works over any key-value store (Raycast LocalStorage in the app, a Map in tests),
- * one key per record so commands running side by side don't overwrite each other.
+ * What the extension remembers: drafts, print history, pending jobs and detected printer models.
+ * Works over any key-value store (Raycast LocalStorage in the app, a Map in tests), one key per
+ * record so commands running side by side don't overwrite each other.
  */
 import type { Due } from "./dates";
 import { withoutRasters, type Block } from "./document";
@@ -14,20 +14,19 @@ export interface KV {
   entries(): Promise<[string, string][]>;
 }
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 /** Unpinned history entries kept; older ones are deleted. */
 export const HISTORY_LIMIT = 200;
-export const DEFAULT_LIST_NAME = "To-Do";
 
-export type RecordKind = "list" | "draft" | "history" | "pending";
-export type Source = "list" | "compose" | "selection" | "image" | "library" | "status";
+export type RecordKind = "draft" | "history" | "pending";
+export type Source = "compose" | "selection" | "image" | "library" | "status" | "ai";
 
-export interface ListItem {
+/** A checklist item as kept in a record, with the due date it was printed with. */
+export interface StoredItem {
   id: string;
   text: string;
   due?: Due;
   done?: boolean;
-  doneAt?: string;
 }
 
 export interface StoredReceipt {
@@ -35,10 +34,10 @@ export interface StoredReceipt {
   kind: RecordKind;
   style: Style;
   title?: string;
-  /** The receipt text. Lists keep their tasks in `items` instead. */
+  /** The receipt text. */
   body: string;
-  /** A list's tasks, or the tasks a history entry printed. */
-  items?: ListItem[];
+  /** The items of a checklist that came with due dates, so a reprint groups them the same way. */
+  items?: StoredItem[];
   /** The content of a "document" receipt, with images kept by path. */
   blocks?: Block[];
   pinned?: boolean;
@@ -61,7 +60,6 @@ export interface PrinterCache {
 
 const RECORD = "rec:";
 const PRINTER = "printer:";
-const DEFAULT_LIST = "list:default";
 const SCHEMA = "schema";
 
 /** Time-sortable ids: base-36 milliseconds plus a random tail. */
@@ -69,29 +67,28 @@ export function newId(now = Date.now()): string {
   return now.toString(36).padStart(9, "0") + Math.random().toString(36).slice(2, 8).padEnd(6, "0");
 }
 
-export const openItems = (items: ListItem[] = []) => items.filter((item) => !item.done);
-
-const toChecklist = (items: ListItem[]): ChecklistItem[] =>
+const toChecklist = (items: StoredItem[]): ChecklistItem[] =>
   items.map((item) => ({ text: item.text, checked: !!item.done, depth: 0, due: item.due }));
 
-/** Plain-text version of tasks, for copying and for the body of history entries. */
-export function itemsMarkdown(items: ListItem[]): string {
-  return items.map((item) => `- [${item.done ? "x" : " "}] ${item.text}`).join("\n");
+const dueText = (due?: Due) => (due ? ` ${due.date}${due.time ? ` ${due.time}` : ""}` : "");
+
+/**
+ * Plain-text version of items, for copying and for editing. Due dates go at the end of the line as
+ * "2026-09-30 15:00", which checklistFromText reads back.
+ */
+export function itemsMarkdown(items: Pick<StoredItem, "text" | "due" | "done">[]): string {
+  return items.map((item) => `- [${item.done ? "x" : " "}] ${item.text}${dueText(item.due)}`).join("\n");
 }
 
-/** What printing a record prints. A list prints its open tasks. */
+/** What printing a record prints. Items win over the text when a record has both. */
 export function receiptOf(record: StoredReceipt): Receipt {
-  if (record.kind === "list") {
-    const open = openItems(record.items);
-    return { style: "checklist", title: record.title, body: itemsMarkdown(open), items: toChecklist(open) };
-  }
   if (record.items) {
     return { style: record.style, title: record.title, body: record.body, items: toChecklist(record.items) };
   }
   return { style: record.style, title: record.title, body: record.body, blocks: record.blocks };
 }
 
-const snapshot = (receipt: Receipt): ListItem[] | undefined =>
+const snapshot = (receipt: Receipt): StoredItem[] | undefined =>
   receipt.items?.map((item) => ({ id: newId(), text: item.text, due: item.due, done: item.checked || undefined }));
 
 const storedBlocks = (receipt: Receipt): Block[] | undefined => receipt.blocks && withoutRasters(receipt.blocks);
@@ -105,8 +102,22 @@ export class Store {
   async migrate(): Promise<void> {
     const version = Number(await this.kv.get(SCHEMA)) || 0;
     if (version >= SCHEMA_VERSION) return;
-    // Version 1 numbered one ticket per task; version 2 prints whole lists.
+    // Version 1 numbered one ticket per task; version 2 printed whole lists.
     if (version < 2) await this.kv.remove("seq:ticket");
+    // Version 3 dropped the built-in to-do lists: each list becomes a draft of its open tasks.
+    if (version < 3) {
+      for (const record of await this.all()) {
+        if ((record.kind as string) !== "list") continue;
+        const open = (record.items ?? []).filter((item) => !item.done);
+        if (open.length === 0) {
+          await this.kv.remove(RECORD + record.id);
+          continue;
+        }
+        const items = open.map(({ id, text, due }) => ({ id, text, due }));
+        await this.save({ ...record, kind: "draft", style: "checklist", body: itemsMarkdown(items), items });
+      }
+      await this.kv.remove("list:default");
+    }
     await this.kv.set(SCHEMA, String(SCHEMA_VERSION));
   }
 
@@ -149,70 +160,6 @@ export class Store {
 
   async remove(id: string): Promise<void> {
     await this.kv.remove(RECORD + id);
-    if ((await this.kv.get(DEFAULT_LIST)) === id) await this.kv.remove(DEFAULT_LIST);
-  }
-
-  async lists(): Promise<StoredReceipt[]> {
-    return (await this.all()).filter((record) => record.kind === "list");
-  }
-
-  async createList(name: string, items: Omit<ListItem, "id">[] = []): Promise<StoredReceipt> {
-    return this.create({
-      kind: "list",
-      style: "checklist",
-      title: name.trim(),
-      body: "",
-      items: items.map((item) => ({ ...item, id: newId() })),
-      source: "library",
-    });
-  }
-
-  /** The list tasks go to when no other list is named, created on first use. */
-  async defaultList(): Promise<StoredReceipt> {
-    const id = await this.kv.get(DEFAULT_LIST);
-    const current = id ? await this.get(id) : undefined;
-    if (current?.kind === "list") return current;
-    const list = await this.createList(DEFAULT_LIST_NAME);
-    await this.kv.set(DEFAULT_LIST, list.id);
-    return list;
-  }
-
-  async setDefaultList(id: string): Promise<void> {
-    await this.kv.set(DEFAULT_LIST, id);
-  }
-
-  async isDefaultList(id: string): Promise<boolean> {
-    return (await this.kv.get(DEFAULT_LIST)) === id;
-  }
-
-  private async editList(listId: string, edit: (items: ListItem[]) => ListItem[]): Promise<StoredReceipt> {
-    const list = await this.get(listId);
-    if (!list || list.kind !== "list") throw new Error("That list no longer exists.");
-    return this.save({ ...list, items: edit(list.items ?? []) });
-  }
-
-  async addToList(listId: string, text: string, due?: Due): Promise<StoredReceipt> {
-    return this.editList(listId, (items) => [...items, { id: newId(), text: text.trim(), due }]);
-  }
-
-  async updateItem(listId: string, itemId: string, patch: Partial<Omit<ListItem, "id">>): Promise<StoredReceipt> {
-    return this.editList(listId, (items) => items.map((item) => (item.id === itemId ? { ...item, ...patch } : item)));
-  }
-
-  async setDone(listId: string, itemId: string, done: boolean): Promise<StoredReceipt> {
-    return this.updateItem(listId, itemId, done ? { done, doneAt: this.clock().toISOString() } : { done: false });
-  }
-
-  async removeItem(listId: string, itemId: string): Promise<StoredReceipt> {
-    return this.editList(listId, (items) => items.filter((item) => item.id !== itemId));
-  }
-
-  async clearDone(listId: string): Promise<StoredReceipt> {
-    return this.editList(listId, (items) => items.filter((item) => !item.done));
-  }
-
-  async clearList(listId: string): Promise<StoredReceipt> {
-    return this.editList(listId, () => []);
   }
 
   /** Logs a successful print. A pending job becomes the history entry; anything else gets a new one. */
@@ -226,7 +173,7 @@ export class Store {
       delete done.maybePrinted;
       record = await this.save(done);
     } else {
-      if (from && (from.kind === "list" || from.kind === "draft")) await this.save({ ...from, printedAt });
+      if (from?.kind === "draft") await this.save({ ...from, printedAt });
       record = await this.create({
         kind: "history",
         style: receipt.style,

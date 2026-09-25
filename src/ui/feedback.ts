@@ -13,6 +13,9 @@ export function unsupportedNote(unsupported: string[]): string | undefined {
   return `${unsupported.length} ${plural} printed as “?”: ${unsupported.join(" ")}`;
 }
 
+export const MODEL_HINT =
+  "The printer didn't say what model it is, so the 80 mm default layout was used. If lines wrap oddly, pick your printer under Printer Model in the preferences.";
+
 function failureMessage(result: Failure): string {
   const partial = result.error.maybePrinted ? " Part of it may have printed." : "";
   return [result.error.message + partial, result.error.hint].filter(Boolean).join(" ");
@@ -26,11 +29,13 @@ export async function showPrintResult(result: PrintResult, what?: string, toast?
   if (result.ok) {
     target.style = Toast.Style.Success;
     target.title = printedTitle(what);
-    target.message = unsupportedNote(result.unsupported);
+    target.message = [unsupportedNote(result.unsupported), result.modelDetected ? undefined : MODEL_HINT]
+      .filter(Boolean)
+      .join(" ");
     return;
   }
   target.style = Toast.Style.Failure;
-  target.title = "Not printed, saved to Pending";
+  target.title = result.record ? "Not printed, saved to Pending" : "Not printed";
   target.message = failureMessage(result);
   target.primaryAction = SETTINGS_PROBLEMS.has(result.error.code)
     ? { title: "Open Preferences", onAction: () => openExtensionPreferences() }

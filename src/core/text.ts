@@ -1,7 +1,7 @@
 /** Cleaning up text before it goes to the printer, and reading lists out of it. */
 import CodepageEncoder from "@point-of-sale/codepage-encoder";
 import { parseTask, type DateOrder } from "./dates";
-import type { ChecklistItem } from "./types";
+import type { ChecklistItem, Receipt, Style } from "./types";
 
 /** Symbols that are common in notes but missing from every receipt printer code page. */
 const SUBSTITUTIONS: [RegExp, string][] = [
@@ -175,4 +175,14 @@ export function summarize(title: string | undefined, body: string, max = 60): st
       .find(Boolean) ||
     "Untitled";
   return first.length > max ? `${first.slice(0, max - 1)}…` : first;
+}
+
+export type StyleChoice = "auto" | Style;
+
+/** A receipt from text and an optional title, picking the style when it's "auto" or not given. */
+export function receiptFromText(text: string, options: { title?: string; style?: StyleChoice } = {}): Receipt {
+  const title = options.title?.trim() || undefined;
+  const style = options.style ?? "auto";
+  if (style !== "auto") return { style, title, body: text };
+  return { style: detectStyle(title ? `# ${title}\n${text}` : text), title, body: text };
 }

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { DEFAULT_LIST_NAME, HISTORY_LIMIT, receiptOf, SCHEMA_VERSION, Store } from "../../src/core/store";
+import { HISTORY_LIMIT, itemsMarkdown, receiptOf, SCHEMA_VERSION, Store } from "../../src/core/store";
+import { checklistFromText } from "../../src/core/text";
 import { MemoryKV } from "../harness/memory-kv";
 
 function setup(start = new Date(2026, 8, 23, 9, 0)) {
@@ -18,46 +19,75 @@ test("migrate writes the schema version and drops the old ticket counter", async
   assert.equal(kv.map.has("seq:ticket"), false);
 });
 
-test("the default list is created once and remembered", async () => {
-  const { store } = setup();
-  const first = await store.defaultList();
-  const second = await store.defaultList();
-  assert.equal(first.title, DEFAULT_LIST_NAME);
-  assert.equal(first.id, second.id);
-  assert.ok(await store.isDefaultList(first.id));
-  await store.remove(first.id);
-  const replacement = await store.defaultList();
-  assert.notEqual(replacement.id, first.id, "deleting the default list makes a new one");
+test("migrate turns version 2 lists into drafts of their open tasks, and drops empty ones", async () => {
+  const { kv, store } = setup();
+  kv.map.set("schema", "2");
+  const stamp = "2026-09-20T10:00:00.000Z";
+  kv.map.set(
+    "rec:list1",
+    JSON.stringify({
+      id: "list1",
+      kind: "list",
+      style: "checklist",
+      title: "To-Do",
+      body: "",
+      items: [
+        { id: "a", text: "call dentist", due: { date: "2026-09-24", time: "15:00" } },
+        { id: "b", text: "buy milk" },
+        { id: "c", text: "old task", done: true, doneAt: stamp },
+      ],
+      source: "library",
+      createdAt: stamp,
+      updatedAt: stamp,
+    }),
+  );
+  kv.map.set(
+    "rec:list2",
+    JSON.stringify({
+      id: "list2",
+      kind: "list",
+      style: "checklist",
+      title: "Empty",
+      body: "",
+      items: [],
+      source: "library",
+      createdAt: stamp,
+      updatedAt: stamp,
+    }),
+  );
+  kv.map.set("list:default", "list1");
+  await store.migrate();
+
+  const records = await store.all();
+  assert.deepEqual(
+    records.map((record) => [record.id, record.kind]),
+    [["list1", "draft"]],
+  );
+  const draft = records[0];
+  assert.equal(draft.body, "- [ ] call dentist 2026-09-24 15:00\n- [ ] buy milk");
+  assert.equal(draft.items?.length, 2);
+  assert.deepEqual(receiptOf(draft).items?.[0].due, { date: "2026-09-24", time: "15:00" });
+  assert.equal(kv.map.has("list:default"), false);
+  assert.equal(kv.map.get("schema"), String(SCHEMA_VERSION));
 });
 
-test("tasks carry due dates, and printing a list prints its open tasks", async () => {
-  const { store } = setup();
-  const list = await store.defaultList();
-  await store.addToList(list.id, " call dentist ", { date: "2026-09-24", time: "15:00" });
-  await store.addToList(list.id, "buy milk");
-  const withTasks = await store.addToList(list.id, "old task");
-  const old = withTasks.items!.find((item) => item.text === "old task")!;
-  await store.setDone(list.id, old.id, true);
-
-  const saved = (await store.get(list.id))!;
-  assert.equal(saved.items?.length, 3);
-  assert.ok(saved.items?.find((item) => item.id === old.id)?.doneAt);
-  const receipt = receiptOf(saved);
-  assert.equal(receipt.style, "checklist");
-  assert.deepEqual(receipt.items, [
-    { text: "call dentist", checked: false, depth: 0, due: { date: "2026-09-24", time: "15:00" } },
-    { text: "buy milk", checked: false, depth: 0, due: undefined },
-  ]);
-  assert.equal(receipt.body, "- [ ] call dentist\n- [ ] buy milk");
-
-  await store.clearDone(list.id);
-  assert.equal((await store.get(list.id))!.items?.length, 2);
-  const first = (await store.get(list.id))!.items![0];
-  await store.updateItem(list.id, first.id, { due: undefined, text: "call the dentist" });
-  assert.deepEqual((await store.get(list.id))!.items![0].text, "call the dentist");
-  await store.removeItem(list.id, first.id);
-  await store.clearList(list.id);
-  assert.deepEqual((await store.get(list.id))!.items, []);
+test("itemsMarkdown writes dates that checklistFromText reads back", () => {
+  const items = [
+    { text: "call dentist", due: { date: "2026-09-24", time: "15:00" } },
+    { text: "pay rent", due: { date: "2026-10-01" } },
+    { text: "buy milk", done: true },
+  ];
+  const markdown = itemsMarkdown(items);
+  assert.equal(markdown, "- [ ] call dentist 2026-09-24 15:00\n- [ ] pay rent 2026-10-01\n- [x] buy milk");
+  const parsed = checklistFromText(markdown, { now: new Date(2026, 8, 23, 9, 0), order: "month-first" });
+  assert.deepEqual(
+    parsed.items.map((item) => [item.text, item.checked, item.due]),
+    [
+      ["call dentist", false, { date: "2026-09-24", time: "15:00" }],
+      ["pay rent", false, { date: "2026-10-01" }],
+      ["buy milk", true, undefined],
+    ],
+  );
 });
 
 test("records come back newest first", async () => {
@@ -91,13 +121,21 @@ test("a pending job becomes its history entry once printed", async () => {
   assert.equal((await store.all()).length, 1);
 });
 
-test("printing a list keeps the list and logs a snapshot of its tasks", async () => {
+test("printing a draft keeps the draft and logs a snapshot with its dates", async () => {
   const { store } = setup();
-  const list = await store.createList("Trip", [{ text: "socks", due: { date: "2026-09-25" } }]);
-  await store.recordPrinted(receiptOf(list), { source: "list", fromId: list.id });
+  const items = [{ id: "s", text: "socks", due: { date: "2026-09-25" } }];
+  const draft = await store.create({
+    kind: "draft",
+    style: "checklist",
+    title: "Trip",
+    body: itemsMarkdown(items),
+    items,
+    source: "compose",
+  });
+  await store.recordPrinted(receiptOf(draft), { source: "library", fromId: draft.id });
   const records = await store.all();
   assert.equal(records.length, 2);
-  assert.ok(records.find((record) => record.kind === "list")?.printedAt);
+  assert.ok(records.find((record) => record.kind === "draft")?.printedAt);
   const history = records.find((record) => record.kind === "history")!;
   assert.equal(history.items?.[0].text, "socks");
   assert.deepEqual(receiptOf(history).items?.[0].due, { date: "2026-09-25" });

@@ -213,15 +213,30 @@ async function readStatus(
   return decodeStatus(raw);
 }
 
-/** Ends the connection after `job` and resolves once the printer has taken every byte and closed its side. */
-function writeAndClose(socket: net.Socket, job: Uint8Array, deadlineMs: number): Promise<void> {
+/**
+ * Sends `job`, closes our side, and resolves once the printer has taken it. The clearest sign is the
+ * printer closing its side in turn (Epson does). Printers that keep the connection open would look
+ * stalled forever, so once every byte has left (the socket's "finish") the job counts as sent after
+ * `closeGraceMs` without a close. A printer that stops taking data blocks "finish" and is reported
+ * as stalled at `deadlineMs`.
+ */
+function writeAndClose(socket: net.Socket, job: Uint8Array, deadlineMs: number, closeGraceMs: number): Promise<void> {
   return new Promise((resolve, reject) => {
-    const fail = (error: PrinterError) => {
-      clearTimeout(timer);
-      socket.destroy();
-      reject(error);
+    let settled = false;
+    let grace: NodeJS.Timeout | undefined;
+    const settle = (outcome: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(deadline);
+      clearTimeout(grace);
+      outcome();
     };
-    const timer = setTimeout(
+    const fail = (error: PrinterError) =>
+      settle(() => {
+        socket.destroy();
+        reject(error);
+      });
+    const deadline = setTimeout(
       () =>
         fail(
           new PrinterError("STALLED", "The printer stopped taking data.", {
@@ -240,8 +255,17 @@ function writeAndClose(socket: net.Socket, job: Uint8Array, deadlineMs: number):
       ),
     );
     socket.once("close", (hadError) => {
-      clearTimeout(timer);
-      if (!hadError) resolve();
+      if (!hadError) settle(resolve);
+    });
+    socket.once("finish", () => {
+      grace = setTimeout(
+        () =>
+          settle(() => {
+            socket.destroy();
+            resolve();
+          }),
+        closeGraceMs,
+      );
     });
     socket.end(Buffer.from(job));
   });
@@ -257,10 +281,14 @@ export function serialize<T>(task: () => Promise<T>): Promise<T> {
   return run;
 }
 
+const DEFAULT_CLOSE_GRACE_MS = 2000;
+
 export interface SendOptions {
   connectTimeoutMs?: number;
   /** How long the printer may take to accept the whole job. Defaults to 10 s plus 1 s per 10 KB. */
   deadlineMs?: number;
+  /** How long to wait for the printer to close the connection after taking the job. Default 2 s. */
+  closeGraceMs?: number;
   /** Check the real-time status first and refuse to print when the printer can't. ESC/POS printers only. */
   preflight?: boolean;
 }
@@ -282,7 +310,12 @@ export async function sendJob(endpoint: Endpoint, job: Uint8Array, options: Send
       const reason = status && blockingReason(status);
       if (reason) throw new PrinterError("NOT_READY", reason, { status });
     }
-    await writeAndClose(socket, job, options.deadlineMs ?? 10_000 + Math.ceil(job.length / 10));
+    await writeAndClose(
+      socket,
+      job,
+      options.deadlineMs ?? 10_000 + Math.ceil(job.length / 10),
+      options.closeGraceMs ?? DEFAULT_CLOSE_GRACE_MS,
+    );
     return { ms: Date.now() - started, status };
   } finally {
     socket.destroy();

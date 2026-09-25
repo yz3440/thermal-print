@@ -2,7 +2,7 @@
  * A pretend ESC/POS network printer for tests and development.
  *
  * It answers DLE EOT status and GS I identity queries, keeps every job it receives,
- * and can misbehave on purpose (offline, cover open, never finishing a job).
+ * and can misbehave on purpose (offline, cover open, jammed, never closing the connection).
  *
  * As a command it saves each job to .captures/<time>.bin and .png:
  *   npm run fake-printer -- [--port 9100] [--model epson-tm-t88v] [--offline] [--cover-open] [--paper-out]
@@ -16,8 +16,10 @@ export interface FakePrinterOptions {
   status?: { printer?: number; offline?: number; error?: number; paper?: number };
   /** GS I replies; leave out to not answer identity queries at all. */
   identity?: { maker?: string; model?: string; firmware?: string };
-  /** Take the data but never finish the job, like a jammed printer. */
-  stall?: boolean;
+  /** Take the whole job but never close the connection, as some printers do. */
+  keepOpen?: boolean;
+  /** Stop reading once the job starts arriving, like a jammed printer whose buffer is full. */
+  jam?: boolean;
   /** Called with each finished job (status queries removed). */
   onJob?: (job: Buffer) => void;
 }
@@ -37,7 +39,7 @@ export class FakePrinter {
 
   /** Starts listening on 127.0.0.1 and returns the port. */
   async start(port = 0): Promise<number> {
-    const server = net.createServer({ allowHalfOpen: !!this.options.stall }, (socket) => this.handle(socket));
+    const server = net.createServer({ allowHalfOpen: !!this.options.keepOpen }, (socket) => this.handle(socket));
     this.server = server;
     await new Promise<void>((resolve, reject) => {
       server.once("error", reject);
@@ -85,6 +87,7 @@ export class FakePrinter {
         }
       }
       pending = pending.subarray(i);
+      if (this.options.jam && job.length > 0) socket.pause();
     });
 
     socket.on("end", () => {
@@ -93,7 +96,7 @@ export class FakePrinter {
         this.jobs.push(bytes);
         this.options.onJob?.(bytes);
       }
-      if (!this.options.stall) socket.end();
+      if (!this.options.keepOpen) socket.end();
     });
   }
 }

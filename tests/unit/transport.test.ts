@@ -77,14 +77,24 @@ test("times out on an address nobody answers", async () => {
   await rejectsWith(sendJob({ host: "192.0.2.1", port: 9100 }, job, { connectTimeoutMs: 300 }), "TIMEOUT");
 });
 
-test("reports a printer that never finishes as stalled, maybe printed", async () => {
-  const { endpoint } = await fake({ stall: true });
-  await assert.rejects(sendJob(endpoint, job, { deadlineMs: 300 }), (error: unknown) => {
+test("reports a printer that stops taking data as stalled, maybe printed", async () => {
+  const { endpoint } = await fake({ jam: true });
+  // Bigger than the loopback socket buffers, so the writes really do stop.
+  const big = Buffer.alloc(32 * 1024 * 1024, 0x20);
+  await assert.rejects(sendJob(endpoint, big, { deadlineMs: 300 }), (error: unknown) => {
     assert.ok(error instanceof PrinterError);
     assert.equal(error.code, "STALLED");
     assert.equal(error.maybePrinted, true);
     return true;
   });
+});
+
+test("a printer that takes the job but never closes its side counts as printed", async () => {
+  const { printer, endpoint } = await fake({ keepOpen: true });
+  const started = Date.now();
+  await sendJob(endpoint, job, { closeGraceMs: 100 });
+  assert.equal(printer.jobs.length, 1);
+  assert.ok(Date.now() - started >= 100, "waits the grace period for a close first");
 });
 
 test("probe reads status and identity", async () => {

@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import type { Block } from "../../src/core/document";
 import { blankImage } from "../../src/core/image";
-import { printReceipt, type PrinterSettings } from "../../src/core/print";
-import { receiptOf, Store } from "../../src/core/store";
+import { printReceipt, type PrintJob, type PrinterSettings } from "../../src/core/print";
+import { itemsMarkdown, receiptOf, Store } from "../../src/core/store";
 import { FakePrinter, freePort } from "../harness/fake-printer";
 import { MemoryKV } from "../harness/memory-kv";
 
@@ -26,20 +26,28 @@ async function setup(options: ConstructorParameters<typeof FakePrinter>[0] = {})
   return { printer, store, settings };
 }
 
-async function todoJob(store: Store) {
-  const list = await store.defaultList();
-  await store.addToList(list.id, "call dentist", { date: "2026-09-24", time: "15:00" });
-  await store.addToList(list.id, "buy milk");
-  const saved = (await store.get(list.id))!;
-  return { receipt: receiptOf(saved), source: "list" as const, fromId: saved.id };
+/** A checklist with dates, as the print-checklist tool builds it. */
+function todoJob(): PrintJob {
+  const items = [
+    { text: "call dentist", due: { date: "2026-09-24", time: "15:00" }, done: false },
+    { text: "buy milk", done: false },
+  ];
+  return {
+    receipt: {
+      style: "checklist",
+      title: "To-Do",
+      body: itemsMarkdown(items),
+      items: items.map((item) => ({ text: item.text, checked: item.done, depth: 0, due: item.due })),
+    },
+    source: "ai",
+  };
 }
 
 test("prints a whole list as one job with one cut", async () => {
   const { printer, store, settings } = await setup();
-  const result = await printReceipt(store, settings, await todoJob(store), {
-    now: () => new Date(2026, 8, 23, 18, 52),
-  });
+  const result = await printReceipt(store, settings, todoJob(), { now: () => new Date(2026, 8, 23, 18, 52) });
   assert.ok(result.ok);
+  assert.equal(result.modelDetected, true);
   assert.equal(printer.jobs.length, 1);
   const text = printer.jobs[0].toString("latin1");
   assert.match(text, /call dentist/);
@@ -49,32 +57,40 @@ test("prints a whole list as one job with one cut", async () => {
   assert.equal(cuts, 1, "one cut for the whole list");
   const history = (await store.all()).filter((record) => record.kind === "history");
   assert.equal(history.length, 1);
+  assert.equal(history[0].items?.length, 2);
 });
 
 test("auto-detect asks the printer once and remembers the answer", async () => {
   const { printer, store, settings } = await setup();
-  const job = await todoJob(store);
-  await printReceipt(store, settings, job);
-  await printReceipt(store, settings, job);
+  await printReceipt(store, settings, todoJob());
+  await printReceipt(store, settings, todoJob());
   assert.equal(printer.connections, 3, "one probe, two jobs");
   const cached = await store.printerCache(settings.address);
   assert.deepEqual(cached, { model: "epson-tm-t88v", detected: true, identity: "EPSON TM-T88V" });
 });
 
+test("a printer that gives no identity prints with the fallback, flagged as not detected", async () => {
+  const { store, settings } = await setup({ identity: undefined });
+  const result = await printReceipt(store, settings, { receipt: { style: "memo", body: "note" }, source: "compose" });
+  assert.ok(result.ok);
+  assert.equal(result.modelDetected, false);
+  assert.equal(result.spec.model, "epson-tm-t88v");
+});
+
 test("a failed print goes to Pending with the tasks kept", async () => {
   const { store, settings } = await setup({ status: { offline: 0x16 } });
-  const failed = await printReceipt(store, { ...settings, model: "epson-tm-t88v" }, await todoJob(store));
+  const failed = await printReceipt(store, { ...settings, model: "epson-tm-t88v" }, todoJob());
   assert.ok(!failed.ok && failed.error.code === "NOT_READY");
-  assert.equal(failed.record.kind, "pending");
-  assert.match(failed.record.error ?? "", /cover/);
-  assert.equal(failed.record.items?.length, 2);
+  assert.equal(failed.record?.kind, "pending");
+  assert.match(failed.record?.error ?? "", /cover/);
+  assert.equal(failed.record?.items?.length, 2);
 });
 
 test("retrying a pending job turns it into history", async () => {
   const { store, settings } = await setup();
   const offline = { ...settings, address: `127.0.0.1:${await freePort()}`, model: "epson-tm-t88v" };
   const failed = await printReceipt(store, offline, { receipt: { style: "memo", body: "note" }, source: "compose" });
-  assert.equal(failed.ok, false);
+  assert.ok(!failed.ok && failed.record);
   const retried = await printReceipt(
     store,
     { ...settings, model: "epson-tm-t88v" },
@@ -86,6 +102,18 @@ test("retrying a pending job turns it into history", async () => {
     (await store.all()).map((record) => record.kind),
     ["history"],
   );
+});
+
+test("a printer that never closes the connection still counts as printed", async () => {
+  const { printer, store, settings } = await setup({ keepOpen: true });
+  const result = await printReceipt(
+    store,
+    { ...settings, model: "epson-tm-t88v" },
+    { receipt: { style: "memo", body: "note" }, source: "compose" },
+    { send: { closeGraceMs: 100 } },
+  );
+  assert.ok(result.ok);
+  assert.equal(printer.jobs.length, 1);
 });
 
 test("images are loaded, printed, and stored by path only", async () => {
@@ -115,7 +143,7 @@ test("images are loaded, printed, and stored by path only", async () => {
   assert.ok(saved && saved.type === "image" && saved.src === "/photos/sunset.png" && !saved.raster);
 });
 
-test("a bad address is kept as a pending job with a config error", async () => {
+test("a bad address fails with a config error and is not kept as pending", async () => {
   const store = new Store(new MemoryKV());
   const result = await printReceipt(
     store,
@@ -123,5 +151,6 @@ test("a bad address is kept as a pending job with a config error", async () => {
     { receipt: { style: "memo", body: "note" }, source: "compose" },
   );
   assert.ok(!result.ok && result.error.code === "CONFIG");
-  assert.equal((await store.all())[0].kind, "pending");
+  assert.equal(result.record, undefined);
+  assert.equal((await store.all()).length, 0);
 });
